@@ -1,0 +1,44 @@
+name: heartbeat
+# Timer for the private flat search (luca1997sb/liveinzh), because GitHub's own
+# schedule never fires there. Each run waits 20 minutes in the "wait" environment
+# (a wait timer uses no runner minutes), pushes an empty commit to the search repo's
+# "heartbeat" branch, which starts the search, and then starts the next heartbeat.
+# Searches only 05:00-22:59 UTC; at night it just keeps ticking.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * *"   # restarts the chain should it ever stop
+
+concurrency:
+  group: heartbeat
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: wait
+    steps:
+      - name: Start the search
+        continue-on-error: true
+        env:
+          KEY: ${{ secrets.LIVEINZH_KEY }}
+        run: |
+          (( 10#$(date -u +%H) >= 5 && 10#$(date -u +%H) <= 22 )) || exit 0
+          mkdir -p ~/.ssh && umask 077
+          printf '%s\n' "$KEY" > ~/.ssh/tick
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tick -o IdentitiesOnly=yes"
+          git init -q r && cd r
+          git fetch -q --depth 1 --filter=blob:none git@github.com:luca1997sb/liveinzh.git main
+          tick=$(git -c user.name=liveinzh -c user.email=liveinzh@users.noreply.github.com \
+            commit-tree 'FETCH_HEAD^{tree}' -p FETCH_HEAD -m tick)
+          git push -q -f git@github.com:luca1997sb/liveinzh.git "$tick:refs/heads/heartbeat"
+      - name: Next heartbeat
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run heartbeat.yml --repo "$GITHUB_REPOSITORY"
