@@ -1,6 +1,7 @@
 name: heartbeat
 # Timer for the private flat search (luca1997sb/liveinzh), because GitHub's own
 # schedule never fires there. Each run waits 20 minutes in the "wait" environment
+# (5 minutes in "wait5" on weekdays 17:20-17:59 Zurich time, around immomailing's 17:30 send)
 # (a wait timer uses no runner minutes), pushes an empty commit to the search repo's
 # "heartbeat" branch, which starts the search, and then starts the next heartbeat.
 # Searches only 05:00-22:59 UTC; at night it just keeps ticking.
@@ -17,10 +18,25 @@ permissions:
   actions: write
 
 jobs:
+  pick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      env: ${{ steps.p.outputs.env }}
+    steps:
+      - id: p
+        run: |
+          now=$(( 10#$(TZ=Europe/Zurich date +%H) * 60 + 10#$(TZ=Europe/Zurich date +%M) ))
+          if (( $(TZ=Europe/Zurich date +%u) <= 5 && now >= 1040 && now < 1080 )); then
+            echo env=wait5 >> "$GITHUB_OUTPUT"
+          else
+            echo env=wait >> "$GITHUB_OUTPUT"
+          fi
   tick:
+    needs: pick
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    environment: wait
+    environment: ${{ needs.pick.outputs.env }}
     steps:
       - name: Start the search
         continue-on-error: true
